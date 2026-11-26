@@ -1,0 +1,147 @@
+openapi: 3.0.3
+info:
+  title: Go Backup Service
+  version: 1.0.0
+  description: Local API for asynchronous directory backups.
+servers:
+  - url: http://127.0.0.1:8080
+paths:
+  /v1/backups:
+    post:
+      summary: Queue a backup
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          schema: { type: string, maxLength: 128 }
+          description: Optional key for safe request retries.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              additionalProperties: false
+              properties:
+                source:
+                  type: string
+                  description: Directory relative to BACKUP_SOURCE_ROOT.
+      responses:
+        '202':
+          description: New job queued
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Job' }
+        '200':
+          description: Existing job for the same idempotency key
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Job' }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+    get:
+      summary: List recent backup jobs
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Job list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Job' }
+        '400': { $ref: '#/components/responses/Error' }
+  /v1/backups/{id}:
+    parameters:
+      - $ref: '#/components/parameters/JobID'
+    get:
+      summary: Get a backup job
+      responses:
+        '200':
+          description: Job details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Job' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/backups/{id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/JobID'
+    post:
+      summary: Cancel a queued or running job
+      responses:
+        '200':
+          description: Cancelled job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Job' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/backups/{id}/archive:
+    parameters:
+      - $ref: '#/components/parameters/JobID'
+    get:
+      summary: Download a completed archive
+      responses:
+        '200':
+          description: tar.gz archive
+          content:
+            application/gzip:
+              schema: { type: string, format: binary }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /health/live:
+    get:
+      summary: Process liveness
+      responses:
+        '200': { description: Process is running }
+  /health/ready:
+    get:
+      summary: Database readiness
+      responses:
+        '200': { description: Database is available }
+        '503': { $ref: '#/components/responses/Error' }
+components:
+  parameters:
+    JobID:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    Job:
+      type: object
+      required: [id, source, status, attempts, max_attempts, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        source: { type: string }
+        status:
+          type: string
+          enum: [queued, running, completed, failed, cancelled]
+        attempts: { type: integer }
+        max_attempts: { type: integer }
+        archive_name: { type: string }
+        archive_size: { type: integer, format: int64 }
+        last_error: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+  responses:
+    Error:
+      description: Request error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
